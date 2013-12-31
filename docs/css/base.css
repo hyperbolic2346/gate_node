@@ -1,0 +1,115 @@
+#day {
+	text-align: center;
+	width: 400px;
+	margin-left: auto;
+	margin-right: auto;
+	font-size: 24px;
+	font-weight: bold;
+	margin-bottom: 25px;
+}
+
+#live_video_toggle_div {
+	display: block;
+}
+
+#live_video_toggle_button {
+        padding: 25px;
+	margin: 0px 15px;
+	width: 90%;
+}
+
+#live_video_div {
+	display: none;
+	width: 100%;
+}
+
+#live_video {
+	width: 100%;
+}
+
+#live_video_img {
+	width: 100%;
+}
+
+#camera_events_toggle_div {
+	display: block;
+}
+
+#camera_events_toggle_button {
+        padding: 25px;
+	margin: 0px 15px;
+	width: 90%;
+}
+
+#camera_events {
+	display: none;
+}
+
+.camera_event {
+	width: 100%;
+	float: left;
+}
+
+.camera_delete {
+	width: 25px;
+	float: left;
+}
+
+.camera_time {
+	width: 100%;
+	text-align: center;
+}
+
+.camera_video {
+	float: left;
+	width: 80%;
+}
+
+#gate_control_div {
+	width: 100%;
+}
+
+.gate_info {
+	padding-left: 10px;
+	padding-top: 10px;
+}
+
+.gate_status {
+        margin: 15px 0px;
+        padding: 0 0 15px 0;
+	width: 90%;
+        border: 1px solid black;
+        box-shadow: 10px 10px 5px #888888;
+}
+
+.gate_name {
+        background-color: #EEEEEE;
+        font-weight: bold;
+        text-align: center;
+	margin: 0px;
+	padding: 10px 0px;
+}
+
+.gate_status input {
+        padding: 25px;
+	margin: 0px 15px;
+	width: 90%;
+}
+
+.gate_state {
+	margin: 15px 15px 2px;
+}
+
+.gate_hold_state {
+	margin: 15px 15px 2px;
+}
+
+
+.minicalendar { font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 12px; color:navy; text-align:center; border-width:1px 1px; border-style:solid; border-color:#bbbbbb; margin-left: 30px;}
+.normal-day { background-color:#ddffdd; }
+.weekend-day { background-color:#fbfbd4; }
+.selected-day { background-color:#ffb0b0; color:black; font-weight:bold}
+.calendar-month { font-weight:bold}
+.calendar-header { background-color:#e0e0ff; color:black; font-weight:bold; text-align:center; }
+.calendar-footer { background-color:#eeeeee; font-weight:bold; text-align:center; }
+

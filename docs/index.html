@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mega Supa Ajax Gate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <link rel="stylesheet" type="text/css" href="css/base.css" media="screen, handheld" />
+  <link rel="stylesheet" type="text/css" href="css/enhanced.css" media="screen  and (min-width: 40.5em)" />
+  <!--[if (lt IE 9)&(!IEMobile)]>
+  <link rel="stylesheet" type="text/css" href="css/enhanced.css" />
+  <![endif]-->
+  <link rel="stylesheet" type="text/css" href="css/normalize.css" />
+  <link rel="stylesheet" type="text/css" href="css/datepicker.css" />
+<!--  <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/css/base/minified/jquery.ui.datepicker.min.css" /> -->
+<!--  <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/css/base/minified/jquery.ui.theme.min.css" /> -->
+
+  <div id="messages"></div>
+  <div id="login"></div>
+  <div id="day"></div>
+  <div id="live_video_toggle_div"></div>
+  <div id="live_video_div"></div>
+  <div id="gate_control_div"></div>
+  <div id="calendar"></div>
+  <div id="camera_events_toggle_div"></div>
+  <div id="camera_events"></div>
+  <div id="live_background" style="display:none;position:absolute;top:0px;left:0px;width:100%;height:100%;z-index:998;opacity:0.6;filter:alpha(opacity=60);background-color:#000000;"></div>
+
+  <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/1.8.2/jquery.min.js" type="text/javascript"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.4.2/underscore-min.js" type="text/javascript"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/backbone.js/0.9.2/backbone-min.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/1.1.2/handlebars.min.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
+  <script type="text/javascript" src="/lib/html5lightbox/html5lightbox.js"></script>
+  <script src="//crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/md5.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+
+<script id="login-template" type="text/x-handlebars-template">
+  <form name="login_form" id="login_form">
+    <label>Username</label><input type="text" name="username" /><br />
+    <label>Password</label><input type="password" name="password" /><br />
+    <input type="submit" class="login" value="Login" />
+  </form>
+</script>
+
+<script id="live-video-template" type="text/x-handlebars-template">
+      <div id="live_label">Now</div>
+      <div id="live_video">
+        {{{video_link}}}
+      </div>
+</script>
+
+<script id="video-template" type="text/x-handlebars-template">
+    <div class="camera_event" id="camera_event{{id}}">
+      <div class="camera_time">{{pretty_time}}</div>
+      <div class='camera_video'>
+        <a class="html5lightbox" href="{{movie}}.webm" data-ipad="{{movie}}.ipad.mp4" data-iphone="{{movie}}.ipad.mp4" data-width="640" data-height="480">
+          <img data-refresh="{{event_id}}" src="{{thumbnail}}.thumb.jpg" width="100%"/>
+        </a>
+      </div>
+    </div>
+</script>
+
+<script id="gate-template" type="text/x-handlebars-template">
+    <div class="gate_status"><div class="gate_name">{{name}}</div>
+
+      {{#if_eq state "MOVING"}}
+        <div class='gate_state'>Currently Moving</div>
+        <button disabled>Open Gate</button>
+      {{/if_eq}}
+      {{#if_eq state "CLOSED"}}
+        <div class='gate_state'>Closed</div>
+        <button>Open Gate</button>
+      {{/if_eq}}
+      {{#if_eq state "OPEN"}}
+        <div class='gate_state'>Open</div>
+        <button disabled>Open Gate</button>
+      {{/if_eq}}
+
+      {{#if_eq hold_state "HELD BY US"}}
+        <div class='gate_hold_state'>Held By Website</div>
+        <button form={{gate_num}} onClick='release_gate()'>Release Gate</button>
+      {{/if_eq}}
+      {{#if_eq hold_state "HELD BY REMOTE"}}
+        <div class='gate_hold_state'>Held By Remote Control</div>
+        <button form={{gate_num}} onClick='hold_gate()'>Hold Gate Open</button>
+      {{/if_eq}}
+      {{#if_eq hold_state "NOT HELD"}}
+        <div class='gate_hold_state'>Not Held</div>
+        <button form={{gate_num}} onClick='hold_gate()'>Hold Gate Open</button>
+      {{/if_eq}}
+
+      {{#if info}}
+        <div class='gate_info'>{{info}}</div>
+      {{/if}}
+
+    </div>
+</script>
+
+  <script>
+    var Mobile_device = $("#live_video_toggle_div").css('display') != 'none';
+
+    function get_today_as_date_string() {
+      var today = new Date();
+      var date_of_interest = today.getFullYear().toString() + (today.getMonth() + 1).toString();
+      if (today.getDate().toString().length == 1) {
+        date_of_interest += "0" + today.getDate().toString();
+      } else {
+        date_of_interest += today.getDate().toString();
+      }
+
+      return date_of_interest;
+    }
+
+    var Currently_selected_date = '';
+
+    Handlebars.registerHelper('video_link', function() {
+      return new Handlebars.SafeString(
+        '<img id="live_video_img" src="' + window.location.protocol + '//' + window.location.hostname + ':9081/" />'
+      );
+    });
+
+    Handlebars.registerHelper('if_eq', function(a, b, opts) {
+      if (a == b) {
+        return opts.fn(this);
+      } else {
+        return opts.inverse(this);
+      }
+    });
+
+    function getURLParameter(name) {
+      console.log(location.search);
+      return decodeURI(
+             (RegExp('[&|?]' + name + '=' + '(.+?)(&|$|#)').exec(location.search)||[,null])[1]
+      );
+    }
+
+    var Video = Backbone.Model.extend();
+
+    var Videos = Backbone.Collection.extend({
+      url: '/list',
+      model: Video,
+      parse: function(response) {
+        return response.camera_data;
+      }
+    });
+
+    var Gate = Backbone.Model.extend();
+
+    var Gates = Backbone.Collection.extend({
+      url: '/gate_status',
+      model: Gate,
+    });
+
+    var GateView = Backbone.View.extend({
+      el: '#gate_control_div',
+      template: Handlebars.compile($('#gate-template').html()),
+      initialize: function() {
+        this.collection = new Gates();
+
+        //listen to the reset event on the collection. When the reset event trigger, call the render function.
+        this.collection.on('reset', this.render, this);
+
+        // for the gate, we want to go ahead and fetch it now
+        this.collection.fetch();
+      },
+      render: function() {
+        var that = this;
+	that.$el.empty();
+        _.each(this.collection.models, function (item) {
+            that.$el.append(that.template(item.attributes));
+        }, this);
+      },
+    });
+
+    var gateView = new GateView();
+
+    var CalendarView = Backbone.View.extend({
+      el: '#calendar',
+      render: function(my_view_date) {
+        $('#calendar').datepicker({
+          inline: true,
+          showOtherMonths: true,
+          dayNamesMin: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+          onSelect: function () { change_displayed_date(); }
+        });
+        if (my_view_date != '') {
+          var date_string = my_view_date.slice(4, 6) + '/' + my_view_date.slice(6, 8) + '/' + my_view_date.slice(0, 4);
+          $('#calendar').datepicker('setDate', date_string);
+        }
+      },
+    });
+
+    var calendarView = new CalendarView();
+
+    var VideoListView = Backbone.View.extend({
+      el: '#camera_events',
+      initialize: function() {
+        this.collection = new Videos();
+
+        //listen to the reset event on the collection. When the reset event trigger, call the render function.
+        this.collection.on('reset', this.render, this);
+      },
+      template: Handlebars.compile($('#video-template').html()),
+      render: function() {
+        var that = this;
+	that.$el.empty();
+        _.each(this.collection.models, function (item) {
+            that.$el.append(that.template(item.attributes));
+        }, this);
+      },
+      update_data: function (my_view_date) {
+        var that = this;
+
+        if (Mobile_device) {
+          // on a mobile device, we want to get them to the information they probably want first,
+          // so instead of doing all this, we will just render that and only try to update
+          // this when we get the chance
+
+          $("#camera_events_toggle_div").append($('<input type="button" value="Show Videos" id="camera_events_toggle_button" />'));
+          $("#camera_events_toggle_button").click(function(e) {
+            $("#camera_events").toggle();
+            if ($("#camera_events").css('display') == 'none') { 
+              $("#camera_events_toggle_button").attr('value', 'Show Videos');
+              videoListView.hide();
+            } else { 
+              $("#camera_events_toggle_button").attr('value', 'Hide Videos');
+              if ($('#camera_events').is(':empty')) {
+                var my_view_date = getURLParameter("view_date");
+                if (my_view_date.length <= 0 || my_view_date == "null") {
+                  my_view_date = '';
+                }
+
+                // render video list
+                videoListView.render(my_view_date);
+              }
+            }
+          });
+
+        } else {
+          this.collection.fetch({
+            data: $.param({ view_date: my_view_date}),
+            success: function (col, response) {
+              calendarView.render(my_view_date);
+
+              // render live video
+              liveVideoView.render(my_view_date);
+            },
+            error: function (response) {
+              window.location.hash = "login";
+            },
+            complete: function(xhr, textStatus) {
+              if (typeof html5Lightbox != 'undefined') {
+                html5Lightbox.reReadData();
+              }
+            }
+          })
+        }
+      },
+    });
+
+    var videoListView = new VideoListView();
+
+    var LiveVideoView = Backbone.View.extend({
+      el: '#live_video_div',
+      template: Handlebars.compile($("#live-video-template").html()),
+      hide: function() { this.$el.empty(); },
+      render: function (my_view_date) {
+        if (Mobile_device) {
+          that = this;
+
+          $("#live_video_toggle_div").append($('<input type="button" value="Show Live Feed" id="live_video_toggle_button" />'));
+          $("#live_video_toggle_button").click(function(e) {
+            $("#live_video_div").toggle();
+            if ($("#live_video_div").css('display') == 'none') { 
+              $("#live_video_toggle_button").attr('value', 'Show Live Feed');
+              that.$el.empty();
+            } else {
+              $("#live_video_toggle_button").attr('value', 'Hide Live Feed');
+
+              // show live video
+              if (my_view_date != '') {
+                // not sure if we should show or not yet
+                var date_of_interest = get_today_as_date_string();
+
+                if (date_of_interest != my_view_date) {
+                  that.$el.empty();
+                  return;
+                }
+              }
+
+              that.$el.html(that.template());
+
+              size_live_feed();
+            }
+          });
+        } else {
+          if (my_view_date != '') {
+            // not sure if we should show or not yet
+            var date_of_interest = get_today_as_date_string();
+
+            if (date_of_interest != my_view_date) {
+              this.$el.empty();
+              this.$el.css({'width': 'auto', 'height': 'auto'});
+              return;
+            }
+          }
+
+          this.$el.html(this.template());
+
+          size_live_feed();
+          $("#live_video_img").click(function(e) { $(this).unbind(e); expand(); });
+        }
+      }
+    });
+
+    var liveVideoView = new LiveVideoView();
+
+    var LoginView = Backbone.View.extend({
+      el: '#login',
+
+      events: {
+        "click .login"  : "login"
+      },
+
+      login: function(e) {
+        $('#messages').html("");
+        e.preventDefault();
+        that = this;
+
+        // Get the parameters as an array
+        values = $("#login_form").serializeArray();
+
+        // Find and replace password
+        for (index = 0; index < values.length; ++index) {
+          if (values[index].name == "password") {
+            values[index].value = CryptoJS.MD5(values[index].value);
+            break;
+          }
+        }
+
+        $.post("login", $.param(values))
+          .done(function() {
+            that.$el.html("");
+            window.location.hash = "";
+          })
+          .fail(function() {
+            $('#messages').html("Invalid Login Credentials");
+          });
+      },
+
+      template: Handlebars.compile($("#login-template").html()),
+      render: function () {
+        // nuke calendar if it exists
+        $('#calendar').empty();
+
+        // nuke videos if they exist
+        $('#camera_events').empty();
+
+        // nuke live video feed if it exists
+        $('#live_video_div').empty();
+
+        this.$el.html(this.template());
+      }
+    });
+
+    var loginView = new LoginView();
+
+
+    var Router = Backbone.Router.extend({
+        routes: {
+          "": "home", 
+          "login": "login",
+          "view_date/:date_of_interest": "view_date",
+        }
+    });
+
+    var router = new Router;
+
+    router.on('route:view_date', function(my_view_date) {
+      if (my_view_date.length <= 0 || my_view_date == "null") {
+        my_view_date = '';
+        Currently_selected_date = get_today_as_date_string();
+      } else {
+        Currently_selected_date = my_view_date;
+      }
+
+      videoListView.update_data(my_view_date);
+    });
+
+    router.on('route:home', function() {
+      // render video list
+      Currently_selected_date = get_today_as_date_string();
+      videoListView.update_data('');
+    });
+
+    router.on('route:login', function() {
+      Currently_selected_date = '';
+      loginView.render();
+    });
+
+    Backbone.history.start();
+
+  function change_displayed_date() {
+    var dt = $('#calendar').datepicker("getDate");
+    var date_string = dt.getFullYear().toString() + (dt.getMonth() + 1).toString() + dt.getDate().toString();
+
+    router.navigate('/view_date/' + date_string);    
+    videoListView.update_data(date_string);
+  }
+
+  var Refresh_time = 5000;
+  var Refresh_reset_count = 0;
+
+  function clear_info() {
+    $('#info').html('&nbsp');
+  }
+
+  function update_quicker_for_a_while() {
+    Refresh_time = 1000;
+    Refresh_reset_count = 30;
+  }
+
+  function update_gate_status() {
+    $.getJSON('update_gate_status')
+      .done(function() { Gate_status_updates = true; handle_gate_status_response() })
+      .fail(function() { Gate_status_updates = false; });
+  }
+
+  function expand() {
+    width = $(window).width() - 30;
+    height = $(window).height() - 30;
+
+    width_ratio = 4 / 3 * height;
+    if (width_ratio > width) {
+      // need to use width as limiting factor
+      height = 3 / 4 * width;
+    } else {
+      width = width_ratio;
+    }
+
+    imgleft = $(window).width() / 2 - width / 2;
+    imgtop = $(window).height() / 2 - height / 2;;
+
+    $("#live_background").css({display:'block',height:'100%'}).click(function(e) { $("#live_video").unbind(e); collapse(); });
+
+    item = $("#live_video_img");
+    item.height(height).width(width);
+
+    item.css({position:"absolute", left: imgleft, top: imgtop, "z-index":999});
+    item.click(function(e) { $(this).unbind(e); collapse(); });
+  }
+
+  function collapse() {
+    item = $("#live_video_img");
+    size_live_feed();
+    item.css({position:"relative",left:"0px",top:"0px"});
+
+    $("#live_background").css({display:'none'}).unbind('click');
+    item.click(function(e) { $(this).unbind(e); expand(); });
+  }
+
+  function size_live_feed() {
+    if ($(window).width() > 480 && $(window).height() > 400) {
+      div_height = $(window).height() - 240;  // 240 for one row of thumbnails
+      div_width = 4 / 3 * div_height;
+      $("#live_video_div").css("width", div_width).css("height", div_height);
+      $("#live_video").css("width", div_width - 5).css("height", div_height - 5 - $("#live_label").outerHeight(true));
+      $("#live_video_img").css("width", div_width - 5).css("height", div_height - 5 - $("#live_label").outerHeight(true)); 
+    }
+  }
+
+  function release_gate() {
+    $(this).attr("disabled", true);
+    $.get('ajax_change_gate.php', { release: true, id: $(this).attr("form") }, function (data) { $('#info').html(data).slideDown(); window.setTimeout(clear_info, 5000); update_gate_status(); });
+  }
+
+  function open_gate() {
+    $(this).attr("disabled", true);
+    $.get('ajax_change_gate.php', { open: true, id: $(this).attr("form") }, function (data) { $('#info').html(data).slideDown(); window.setTimeout(clear_info, 5000); update_gate_status(); });
+    update_quicker_for_a_while();
+  }
+
+  function hold_gate() {
+    $(this).attr("disabled", true);
+    $.get('ajax_change_gate.php', { hold: true, id: $(this).attr("form") }, function (data) { $('#info').html(data).slideDown(); window.setTimeout(clear_info, 5000); update_gate_status(); });
+    update_quicker_for_a_while();
+  }
+
+  window.onload = function() {
+    var socket = io.connect();
+    socket.on('deleted', function(data) {
+      if (data.event_date != Currently_selected_date) {
+        console.log("not deleting video since not selected date " + data);
+        return;
+      }
+      console.log("deleting video id " + data);
+      Videos.remove(data.id);
+//      var el = $("#camera_event" + data);
+//      if (el.length > 0) {
+//        el.remove();
+//      }
+    });
+    
+    socket.on('added', function(data) {
+      // if the date isn't the same as what we are looking at, we don't care
+      if (data.event_date != Currently_selected_date) {
+        console.log("ignoring video add due to currently selected date: " + data);
+        return;
+      }
+
+      console.log("adding video " + data);
+      if (!data.thumbnail) {
+        // no thumbnail, insert static
+        console.log("no thumbnail, inserting static");
+        data.thumbnail = "/media/static";
+      }
+      if (data.movie && data.movie.length > 0) {
+        data.movie = data.movie.slice(0, -4);
+      }
+
+      var vid = Videos.get(data.id);
+      if (vid) {
+        vid.set(data);
+      } else {
+        Videos.add(data);
+      }
+    });
+
+  }
+  </script>
+</body>
+</html>

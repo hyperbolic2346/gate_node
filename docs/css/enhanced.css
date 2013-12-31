@@ -1,0 +1,110 @@
+#camera_events {
+    clear: both;
+    display: block;
+}
+
+.camera_event {
+	width: 200px;
+	height: 160px;
+//	border: 1px solid;
+//	margin: 10px 0px 10px 0px;
+	float: left;
+}
+
+#live_video_toggle_div {
+	display: none;
+}
+
+#live_video_div {
+	display: block;
+//	width: 675px;
+//	height: 500px;
+	float: left;
+	clear:left;
+}
+
+#live_label {
+	text-align:center;
+	width: 100%;
+}
+
+#live_video {
+	width: 640px;
+	float: left;
+}
+
+#live_video_img {
+	width: 640px;
+	float: left;
+}
+
+#info {
+	float: left;
+}
+
+#camera_events_toggle_div {
+        display: none;
+}
+
+.camera_delete {
+	width: 25px;
+	height: 29px;
+	float: left;
+}
+
+.camera_time {
+	width: 200px;
+	text-align: center;
+}
+
+.camera_video {
+	float: left;
+	width: 160px;
+}
+
+#gate_control_div {
+	width: auto;
+}
+
+.gate_info {
+	padding-left: 10px;
+	padding-top: 10px;
+}
+
+.gate_status {
+	width: 180px;
+	float: left;
+        margin: 15px 10px;
+	padding: 0px 0px 15px 0px;
+	border: 1px solid black;
+	box-shadow: 10px 10px 5px #888888;
+}
+
+.gate_name {
+}
+
+.gate_status button {
+	-webkit-appearance: none;
+	width: 150px;
+	padding: 15px;
+	margin: 0px 15px;
+	font-weight: bold;
+	border: solid #666 1px;
+	background-color: #FFF;
+	color: #666;
+	font-size: 14px;
+	-webkit-border-radius: .7em;
+	border-radius: .7em;
+	-webkit-box-shadow: 2px 2px 3px #999; 
+	box-shadow: 2px 2px 2px #bbb;
+}
+
+.gate_state {
+}
+
+.gate_hold_state {
+}
+
+#calendar {
+    float: left;
+}
