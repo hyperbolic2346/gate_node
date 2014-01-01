@@ -23,23 +23,63 @@ app.use(express.methodOverride());
 app.use(passport.initialize());
 app.use(passport.session());
 
-var arduino_socket = dgram.createSocket("udp4");
+var Arduino_socket = dgram.createSocket("udp4");
 
-var arduino_response = [];
+var Arduino_response = [];
 
-arduino_socket.on('message', function(msg, rinfo) {
+var Arduino_timeout = 0;
+
+Arduino_socket.on('message', function(msg, rinfo) {
+  var new_arduino_response = [];
   var statuses = JSON.parse(msg);
+  var diff = 0;
 
   for (var idx in statuses) {
     var status = statuses[idx];
 
+    // hackaroo
+    if (idx == 0 && status.state == "MOVING") {
+      // fake it closed :(
+      status.state = "CLOSED";
+    }
+
     status.id = idx;
-    arduino_response.push(status);
+    if (Arduino_response.length == 0 || status.state != Arduino_response[idx].state || status.hold_state != Arduino_response[idx].hold_state) {
+      diff = 1;
+    }
+    new_arduino_response.push(status);
+  }
+
+  Arduino_response = new_arduino_response;
+
+  // compare old and new state, if there is an update, broadcast it
+  if (diff == 1) {
+    // different values, tell the clients
+    io.sockets.emit('gate_status', Arduino_response);
+
+    // and update more frequently for a bit
+    Arduino_timeout = 1000;
+    setTimeout(timeout_tick, 5000);
   }
 });
 
-var message = new Buffer("status:*");
-arduino_socket.send(message, 0, message.length, 8888, "10.0.1.25", function(err, bytes) {});
+function update_gate_info() {
+  var message = new Buffer("status:*");
+  Arduino_socket.send(message, 0, message.length, 8888, "10.0.1.25", function(err, bytes) {});
+
+  if (Arduino_timeout > 0) {
+    setTimeout(update_gate_info, Arduino_timeout);
+  }
+}
+
+function timeout_tick() {
+  if (Arduino_timeout > 0 && Arduino_timeout < 5000 ) {
+    Arduino_timeout += 500;
+    if (Arduino_timeout < 5000) {
+      setTimeout(timeout_tick, 5000);
+    }
+  }
+}
 
 app.get("/", function(req, res) {
   if (req.user) {
@@ -55,6 +95,29 @@ app.get("/", function(req, res) {
 var io = require('socket.io').listen(app.listen(port));
 
 io.set('log level', 1);
+
+var Num_clients = 0;
+
+io.sockets.on('connection', function (socket) {
+  if (Num_clients == 0) {
+    // first client, start timeout
+    Arduino_timeout = 5000;
+    setTimeout(update_gate_info, Arduino_timeout);
+    console.log("starting gate polling");
+  }
+
+  Num_clients++;
+
+  socket.on('disconnect', function () {
+    if (Num_clients == 1) {
+      // no more clients, no more status updates
+      Arduino_timeout = 0;
+      console.log("stopping gate polling");
+    }
+
+    Num_clients--;
+  });
+});
 
 app.get("/logout", function(req, res) {
   req.logout();
@@ -293,8 +356,7 @@ app.get('/gate_status', function(req, res) {
     return;
   }
 
-  console.log('returning ' + arduino_response);
-  res.send(arduino_response);
+  res.send(Arduino_response);
 });
 
 function check_auth_user(username, password, done) {
