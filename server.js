@@ -25,12 +25,17 @@ app.use(passport.session());
 
 var arduino_socket = dgram.createSocket("udp4");
 
+var arduino_response = [];
+
 arduino_socket.on('message', function(msg, rinfo) {
-  var status = JSON.parse(msg);
-  for (var idx in status) {
-    var event = events[idx];
+  var statuses = JSON.parse(msg);
+
+  for (var idx in statuses) {
+    var status = statuses[idx];
+
+    status.id = idx;
+    arduino_response.push(status);
   }
-  console.log('arduino said ' + msg);
 });
 
 var message = new Buffer("status:*");
@@ -85,7 +90,6 @@ app.get('/list', function(req, res) {
   }
 
   if (req.param('view_date')) {
-    console.log("forcing date to " + req.param('view_date'));
     date_of_interest = req.param('view_date');
   }
 
@@ -289,13 +293,13 @@ app.get('/gate_status', function(req, res) {
     return;
   }
 
-  res.send("{}");
+  console.log('returning ' + arduino_response);
+  res.send(arduino_response);
 });
 
 function check_auth_user(username, password, done) {
   var sql="SELECT * FROM users WHERE username = '" + username
           + "' AND password = '" + password + "'";
-  console.log(sql);
   client.query(sql, function(err, results) {
     if (err) {
       throw err;
@@ -312,8 +316,6 @@ function check_auth_user(username, password, done) {
         done(null,result);
       });
 
-      //console.log(JSON.stringify(results));
-      //console.log(results[0]['member_id']);
       console.log("User " + result.username + " logged in.");
       return done(null, result);
     } else {

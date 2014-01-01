@@ -17,7 +17,7 @@ Startup
 -------
 install/build node.js
 
-use npm to install dependencies
+use npm to install dependencies : npm install passport passport-local express mysql socket.io
 
 copy config_example.js to config.js
 edit values to your situation

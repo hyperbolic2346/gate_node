@@ -158,6 +158,9 @@
     var Gates = Backbone.Collection.extend({
       url: '/gate_status',
       model: Gate,
+//      parse: function(response) {
+//        return response[0];
+//      }
     });
 
     var GateView = Backbone.View.extend({
@@ -469,8 +472,12 @@
 
   function size_live_feed() {
     if ($(window).width() > 480 && $(window).height() > 400) {
-      div_height = $(window).height() - 240;  // 240 for one row of thumbnails
-      div_width = 4 / 3 * div_height;
+      div_height = $(window).height() - 150;  // 240 for one row of thumbnails
+      div_width = 16 / 8 * div_height;
+      if (div_width > $(window).width() - 500) {
+        div_width = $(window).width() - 500;
+        div_height = 8 / 16 * div_width;
+      }
       $("#live_video_div").css("width", div_width).css("height", div_height);
       $("#live_video").css("width", div_width - 5).css("height", div_height - 5 - $("#live_label").outerHeight(true));
       $("#live_video_img").css("width", div_width - 5).css("height", div_height - 5 - $("#live_label").outerHeight(true)); 
