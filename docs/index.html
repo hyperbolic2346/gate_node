@@ -184,7 +184,7 @@
       },
     });
 
-//    var gateView = new GateView();
+    var gateView = new GateView();
 
     var CalendarView = Backbone.View.extend({
       el: '#calendar',
@@ -517,7 +517,11 @@
       videoListView.collection.remove(data.id);
       videoListView.render();
     });
-    
+
+    socket.on('gate_status', function(data) {
+      gateView.collection.reset(data);
+    });
+
     socket.on('added', function(data) {
       // if the date isn't the same as what we are looking at, we don't care
       if (data.event_date != Currently_selected_date) {
