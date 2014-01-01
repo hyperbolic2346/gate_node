@@ -26,6 +26,10 @@ app.use(passport.session());
 var arduino_socket = dgram.createSocket("udp4");
 
 arduino_socket.on('message', function(msg, rinfo) {
+  var status = JSON.parse(msg);
+  for (var idx in status) {
+    var event = events[idx];
+  }
   console.log('arduino said ' + msg);
 });
 
@@ -69,6 +73,8 @@ app.get('/list', function(req, res) {
     res.end();
     return;
   }
+
+  console.log(req.user.access_level);
 
   var today = new Date();
   var date_of_interest = today.getFullYear().toString() + (today.getMonth() + 1).toString();
@@ -122,6 +128,10 @@ app.get('/list', function(req, res) {
         events[result.event_id]['camera'] = result.camera;
         events[result.event_id]['pretty_time'] = curr_hour + ":" + curr_min + " " + a_p;
         events[result.event_id]['event_date'] = strtime.slice(0,8);
+        if (req.user.access_level == 0) {
+          events[result.event_id]['can_delete'] = true;
+          events[result.event_id]['can_tag'] = true;
+        }
 
         if (!events[result.event_id]['thumbnail']) {
           events[result.event_id]['thumbnail'] = '/media/static';
@@ -135,12 +145,25 @@ app.get('/list', function(req, res) {
     var event_txt = '';
     for (var idx in events) {
       var event = events[idx];
+
+      new_event_txt = '{"movie": "' + event.movie + '","pretty_time":"' + event.pretty_time + '","id":"' 
+          + event.event_id + '","thumbnail":"' + event.thumbnail + '"';
+      if (event.can_delete) {
+        new_event_txt += ',"can_delete": "true"';
+      }
+      if (event.can_tag) {
+        new_event_txt += ',"can_tag": "true"';
+      }
+
+      new_event_txt += '}';
+
       if (one) {
-        event_txt = ',' + event_txt;
+        new_event_txt += ',';
       } else {
         one = true;
       }
-      event_txt = '{"movie": "' + event.movie + '","pretty_time":"' + event.pretty_time + '","id":"' + event.event_id + '","thumbnail":"' + event.thumbnail + '"}' + event_txt;
+
+      event_txt = new_event_txt + event_txt;
     }
 
     if (!one) {
@@ -187,6 +210,15 @@ app.get('/added', function(req, res) {
 
   response.pretty_time = curr_hour + ":" + curr_min + " " + a_p;
 
+  var date_of_interest = current_time.getFullYear().toString() + (current_time.getMonth() + 1).toString();
+  if (current_time.getDate().toString().length == 1) {
+    date_of_interest += "0" + current_time.getDate().toString();
+  } else {
+    date_of_interest += current_time.getDate().toString();
+  }
+
+  response.event_date = date_of_interest;
+
   if (req.param('thumbnail')) {
     response.thumbnail = req.param('thumbnail').slice(0, -4) + ".thumb.jpg";
   }
@@ -204,13 +236,19 @@ app.get('/added', function(req, res) {
 });
 
 app.get('/delete', function(req, res) {
+  if (!req.user || req.user.access_level != 0) {
+    console.log("invalid user information");
+    res.statusCode = 401;
+    res.end();
+    return;
+  }
+
   if (!req.param('id')) {
     console.log("no incoming id for delete request!");
     return;
   }
 
   var sql = 'UPDATE security_events set deleted=1 WHERE event_id="' + req.param('id') + '"';
-  console.log(sql);
 
   client.query(sql, function(err, results) {
     if (err) {
@@ -218,11 +256,27 @@ app.get('/delete', function(req, res) {
       res.statusCode = 401;
       res.end();
     } else {
-      // notify the other clients this id is gone
-      io.sockets.emit('deleted', req.param('id'));
+      var find_sql = 'SELECT event_time_stamp+1 AS time_stamp FROM security_events WHERE event_id="' + req.param('id') + '"';
 
-      res.statusCode = 200;
-      res.end();
+      client.query(find_sql, function(err, results) {
+        if (err) {
+          throw err;
+          res.statusCode = 401;
+          res.end();
+        } else {
+          // notify the other clients this id is gone
+          var response = {};
+
+          response.event_date = results[0].time_stamp.toString().slice(0,8);
+
+          response.id = req.param('id');
+
+          io.sockets.emit('deleted', response);
+
+          res.statusCode = 200;
+          res.end();
+        }
+      });
     }
   });
 });

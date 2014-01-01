@@ -56,7 +56,13 @@
     <div class="camera_event" id="camera_event{{id}}">
       <div class="camera_time">{{pretty_time}}</div>
       <div class='camera_video'>
-        <a class="html5lightbox" href="{{movie}}.webm" data-ipad="{{movie}}.ipad.mp4" data-iphone="{{movie}}.ipad.mp4" data-width="640" data-height="480">
+        <a class="html5lightbox"
+            href="{{movie}}.webm"
+            data-ipad="{{movie}}.ipad.mp4"
+            data-iphone="{{movie}}.ipad.mp4"
+            data-width="640"
+            data-height="480"
+            title="{{#if can_delete}}<button onClick='delete_event({{id}})'>Delete</button>{{/if}}{{#if can_tag}}Tags<input type='text'></input>{{/if}}">
           <img data-refresh="{{event_id}}" src="{{thumbnail}}.thumb.jpg" width="100%"/>
         </a>
       </div>
@@ -175,7 +181,7 @@
       },
     });
 
-    var gateView = new GateView();
+//    var gateView = new GateView();
 
     var CalendarView = Backbone.View.extend({
       el: '#calendar',
@@ -210,6 +216,9 @@
         _.each(this.collection.models, function (item) {
             that.$el.append(that.template(item.attributes));
         }, this);
+        if (typeof html5Lightbox != 'undefined') {
+          html5Lightbox.reReadData();
+        }
       },
       update_data: function (my_view_date) {
         var that = this;
@@ -251,11 +260,6 @@
             error: function (response) {
               window.location.hash = "login";
             },
-            complete: function(xhr, textStatus) {
-              if (typeof html5Lightbox != 'undefined') {
-                html5Lightbox.reReadData();
-              }
-            }
           })
         }
       },
@@ -408,6 +412,7 @@
     var date_string = dt.getFullYear().toString() + (dt.getMonth() + 1).toString() + dt.getDate().toString();
 
     router.navigate('/view_date/' + date_string);    
+    Currently_selected_date = date_string;
     videoListView.update_data(date_string);
   }
 
@@ -472,6 +477,11 @@
     }
   }
 
+  function delete_event(_id) {
+    $('#html5-close').trigger('click');
+    $.get('delete', {id: _id});
+  }
+
   function release_gate() {
     $(this).attr("disabled", true);
     $.get('ajax_change_gate.php', { release: true, id: $(this).attr("form") }, function (data) { $('#info').html(data).slideDown(); window.setTimeout(clear_info, 5000); update_gate_status(); });
@@ -493,21 +503,18 @@
     var socket = io.connect();
     socket.on('deleted', function(data) {
       if (data.event_date != Currently_selected_date) {
-        console.log("not deleting video since not selected date " + data);
+        console.log("not deleting video since not currently selected date: " + Currently_selected_date + " and event_date of: " + data.event_date);
         return;
       }
-      console.log("deleting video id " + data);
-      Videos.remove(data.id);
-//      var el = $("#camera_event" + data);
-//      if (el.length > 0) {
-//        el.remove();
-//      }
+      console.log("deleting video id " + data.id);
+      videoListView.collection.remove(data.id);
+      videoListView.render();
     });
     
     socket.on('added', function(data) {
       // if the date isn't the same as what we are looking at, we don't care
       if (data.event_date != Currently_selected_date) {
-        console.log("ignoring video add due to currently selected date: " + data);
+        console.log("ignoring video add due to currently selected date: " + Currently_selected_date + " and event_date of: " + data.event_date);
         return;
       }
 
@@ -521,12 +528,13 @@
         data.movie = data.movie.slice(0, -4);
       }
 
-      var vid = Videos.get(data.id);
+      var vid = videoListView.collection.get(data.id);
       if (vid) {
         vid.set(data);
       } else {
-        Videos.add(data);
+        videoListView.collection.add(data);
       }
+      videoListView.render();
     });
 
   }
