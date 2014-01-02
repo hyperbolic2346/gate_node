@@ -99,7 +99,7 @@ io.set('log level', 1);
 var Num_clients = 0;
 
 io.sockets.on('connection', function (socket) {
-  if (Num_clients == 0) {
+  if (Num_clients == 0 && config.control_gate()) {
     // first client, start timeout
     Arduino_timeout = 5000;
     setTimeout(update_gate_info, Arduino_timeout);
@@ -109,7 +109,7 @@ io.sockets.on('connection', function (socket) {
   Num_clients++;
 
   socket.on('disconnect', function () {
-    if (Num_clients == 1) {
+    if (Num_clients == 1 && config.control_gate()) {
       // no more clients, no more status updates
       Arduino_timeout = 0;
       console.log("stopping gate polling");
