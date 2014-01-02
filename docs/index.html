@@ -108,9 +108,15 @@
   <script>
     var Mobile_device = $("#live_video_toggle_div").css('display') != 'none';
 
-    function get_today_as_date_string() {
-      var today = new Date();
-      var date_of_interest = today.getFullYear().toString() + (today.getMonth() + 1).toString();
+    function get_date_as_string(today) {
+      var date_of_interest = today.getFullYear().toString();
+
+      if ((today.getMonth() + 1).toString().length == 1) {
+        date_of_interest += "0" + (today.getMonth() + 1).toString();
+      } else {
+        date_of_interest += (today.getMonth() + 1).toString();
+      }
+
       if (today.getDate().toString().length == 1) {
         date_of_interest += "0" + today.getDate().toString();
       } else {
@@ -118,6 +124,11 @@
       }
 
       return date_of_interest;
+    }
+
+    function get_today_as_date_string() {
+      var today = new Date();
+      return get_date_as_string(today);
     }
 
     var Currently_selected_date = '';
@@ -412,7 +423,7 @@
 
   function change_displayed_date() {
     var dt = $('#calendar').datepicker("getDate");
-    var date_string = dt.getFullYear().toString() + (dt.getMonth() + 1).toString() + dt.getDate().toString();
+    var date_string = get_date_as_string(dt);
 
     router.navigate('/view_date/' + date_string);    
     Currently_selected_date = date_string;

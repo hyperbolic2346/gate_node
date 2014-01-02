@@ -81,6 +81,25 @@ function timeout_tick() {
   }
 }
 
+function get_date_as_string(dt)
+{
+  var date_of_interest = dt.getFullYear().toString();
+
+  if ((dt.getMonth() + 1).toString().toString().length == 1) {
+    date_of_interest += "0" + (dt.getMonth() + 1).toString().toString();
+  } else {
+    date_of_interest += (dt.getMonth() + 1).toString();
+  }
+
+  if (dt.getDate().toString().length == 1) {
+    date_of_interest += "0" + dt.getDate().toString();
+  } else {
+    date_of_interest += dt.getDate().toString();
+  }
+
+  return date_of_interest;
+}
+
 app.get("/", function(req, res) {
   if (req.user) {
     res.statusCode = 200;
@@ -144,13 +163,7 @@ app.get('/list', function(req, res) {
 
   console.log(req.user.access_level);
 
-  var today = new Date();
-  var date_of_interest = today.getFullYear().toString() + (today.getMonth() + 1).toString();
-  if (today.getDate().toString().length == 1) {
-    date_of_interest += "0" + today.getDate().toString();
-  } else {
-    date_of_interest += today.getDate().toString();
-  }
+  var date_of_interest = get_date_as_string(new Date());
 
   if (req.param('view_date')) {
     date_of_interest = req.param('view_date');
@@ -277,14 +290,7 @@ app.get('/added', function(req, res) {
 
   response.pretty_time = curr_hour + ":" + curr_min + " " + a_p;
 
-  var date_of_interest = current_time.getFullYear().toString() + (current_time.getMonth() + 1).toString();
-  if (current_time.getDate().toString().length == 1) {
-    date_of_interest += "0" + current_time.getDate().toString();
-  } else {
-    date_of_interest += current_time.getDate().toString();
-  }
-
-  response.event_date = date_of_interest;
+  response.event_date = get_date_as_string(current_time);
 
   if (req.param('thumbnail')) {
     response.thumbnail = req.param('thumbnail').slice(0, -4) + ".thumb.jpg";
