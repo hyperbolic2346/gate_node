@@ -62,11 +62,26 @@
             data-iphone="{{movie}}.ipad.mp4"
             data-width="640"
             data-height="480"
-            title="{{#if can_delete}}<button onClick='delete_event({{id}})'>Delete</button>{{/if}}{{#if can_tag}}Tags<input type='text'></input>{{/if}}">
+            title="{{#if can_delete}}<button onClick='delete_event({{id}})'>Delete</button>{{/if}}{{#if can_tag}}<div class='tags'>Tags<input type='text' onkeydown='if (event.keyCode == 13) update_tags({{id}}, this)' value='{{tags}}' /></div>{{/if}}">
           <img data-refresh="{{event_id}}" src="{{thumbnail}}.thumb.jpg" width="100%"/>
         </a>
       </div>
     </div>
+</script>
+
+<script id="video-update-template" type="text/x-handlebars-template">
+  <div class="camera_time">{{pretty_time}}</div>
+  <div class='camera_video'>
+    <a class="html5lightbox"
+       href="{{movie}}.webm"
+       data-ipad="{{movie}}.ipad.mp4"
+       data-iphone="{{movie}}.ipad.mp4"
+       data-width="640"
+       data-height="480"
+       title="{{#if can_delete}}<button onClick='delete_event({{id}})'>Delete</button>{{/if}}{{#if can_tag}}<div class='tags'>Tags<input type='text' onkeydown='if (event.keyCode == 13) update_tags({{id}}, this)' value='{{tags}}' /></div>{{/if}}">
+      <img data-refresh="{{event_id}}" src="{{thumbnail}}.thumb.jpg" width="100%"/>
+    </a>
+  </div>
 </script>
 
 <script id="gate-template" type="text/x-handlebars-template">
@@ -222,8 +237,17 @@
 
         //listen to the reset event on the collection. When the reset event trigger, call the render function.
         this.collection.on('reset', this.render, this);
+
+        this.collection.on('change', this.render_single_video, this);
       },
       template: Handlebars.compile($('#video-template').html()),
+      update_template: Handlebars.compile($('#video-update-template').html()),
+      render_single_video: function (model) {
+        $('#camera_event' + model.id).html(this.update_template(model.attributes));
+        if (typeof html5Lightbox != 'undefined') {
+          html5Lightbox.reReadData();
+        }
+      },
       render: function() {
         var that = this;
 	that.$el.empty();
@@ -430,22 +454,22 @@
     videoListView.update_data(date_string);
   }
 
-  var Refresh_time = 5000;
-  var Refresh_reset_count = 0;
+  function update_tags(event_id, inp) {
+    var txt = inp.value;
+
+    console.log("setting tags to " + txt);
+				 
+    $.get('update_tag', {id: event_id, val: txt});
+
+    var vid = videoListView.collection.get(event_id);
+    if (vid) {
+      vid.set({tags: txt});
+    }
+//    $('#html5-close').trigger('click');
+  }
 
   function clear_info() {
     $('#info').html('&nbsp');
-  }
-
-  function update_quicker_for_a_while() {
-    Refresh_time = 1000;
-    Refresh_reset_count = 30;
-  }
-
-  function update_gate_status() {
-    $.getJSON('update_gate_status')
-      .done(function() { Gate_status_updates = true; handle_gate_status_response() })
-      .fail(function() { Gate_status_updates = false; });
   }
 
   function expand() {
