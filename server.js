@@ -85,6 +85,7 @@ function add_tag(e_id, t_id) {
           if (err2) {
             throw err2;
           }
+          console.log('inserted tag mapping ' + post.event_id + ' -> ' + post.tag_id);
         });
       }
     }
@@ -121,7 +122,6 @@ function get_date_as_string(dt)
 
 function build_events_data(events)
 {
-  var one = false;
   var return_val = '{"camera_data":[';
 
   var event_txt = '';
@@ -129,7 +129,7 @@ function build_events_data(events)
     var event = events[idx];
 
     new_event_txt = '{"movie": "' + event.movie + '","pretty_time":"' + event.pretty_time + '","id":"' 
-      + event.event_id + '","thumbnail":"' + event.thumbnail + '"';
+      + event.event_id + '","thumbnail":"' + event.thumbnail + '","pretty_date":"' + event.pretty_date + '"';
     if (event.can_delete) {
       new_event_txt += ',"can_delete":"true"';
     }
@@ -141,16 +141,14 @@ function build_events_data(events)
     
     new_event_txt += '}';
     
-    if (one) {
+    if (event_txt.length > 0) {
       new_event_txt += ',';
-    } else {
-      one = true;
     }
 
     event_txt = new_event_txt + event_txt;
   }
 
-  if (!one) {
+  if (events.length == 0) {
     return "{}";
   } else {
     return_val += event_txt;
@@ -158,6 +156,120 @@ function build_events_data(events)
 
     return return_val;
   }
+}
+
+function process_event_sql_result(sql_result, req, callback)
+{
+  var events = new Object;
+
+  var num_events = sql_result.length;
+  var num_files_read = 0;
+  var num_tags_read = 0;
+
+  if (num_events == 0) {
+    callback(build_events_data(events));
+    return;
+  }
+
+  for (var i=0; i<num_events; ++i) {
+    var result = sql_result[i];
+
+    if (!events[result.event_id]) {
+      events[result.event_id] = {};
+    }
+
+    events[result.event_id]['event_id'] = result.event_id;
+
+    var strtime = result.time_stamp.toString();
+    
+    var curr_hour = strtime.substr(8,2);
+    var a_p = "";
+    
+    if (curr_hour < 12) { a_p = "AM"; } else { a_p = "PM"; }
+    
+    if (curr_hour == 0) { curr_hour = 12; }
+    if (curr_hour > 12) { curr_hour -= 12; }
+    
+    var curr_min = strtime.substr(10,2);
+    if (curr_min.length == 1) { curr_min = "0" + curr_min; }
+
+    events[result.event_id]['camera'] = result.camera;
+    events[result.event_id]['pretty_time'] = curr_hour + ":" + curr_min + " " + a_p;
+    events[result.event_id]['event_date'] = strtime.slice(0,8);
+    events[result.event_id]['pretty_date'] = strtime.slice(4,2) + '/' + strtime.slice(6,2) + '/' + strtime.slice(0, 4);
+
+    if (req.user.access_level == 0) {
+      events[result.event_id]['can_delete'] = true;
+      events[result.event_id]['can_tag'] = true;
+    }
+
+    events[result.event_id]['tags'] = "";
+    
+    // find files for these events
+    var file_sql = 'SELECT event_id, filename, file_type FROM security_file WHERE event_id = ?';
+    client.query(file_sql, result.event_id, function(err, file_results) {
+      if (err) {
+        throw err;
+      }
+
+      for (var j=0; j<file_results.length; ++j) {
+        var file_result = file_results[j];
+
+        if (file_result.file_type == 8) {
+                events[file_result.event_id]['movie'] = file_result.filename.replace(config.get_file_location(), '/media').slice(0, -4);
+          
+                if (!events[file_result.event_id]['thumbnail']) {
+                  events[file_result.event_id]['thumbnail'] = '/media/static';
+                }
+        } else if (file_result.file_type == 1) {
+                events[file_result.event_id]['thumbnail'] = file_result.filename.replace(config.get_file_location(), '/media').slice(0, -4);
+        }
+      }
+
+      num_files_read++;
+      if (num_files_read == num_events && num_tags_read == num_events) {
+        callback(build_events_data(events));
+      }
+    });
+
+    // find tags for these events
+    var tag_sql = 'SELECT tag_val, event_id FROM event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
+                  'WHERE event_id = ?';
+    client.query(tag_sql, result.event_id, function(err, tag_results) {
+      if (err) {
+        throw err;
+      }
+
+      for (var j=0; j<tag_results.length; ++j) {
+        events[tag_results[j].event_id]['tags'] += tag_results[j].tag_val;
+
+        if (j + 1 != tag_results.length) {
+          events[tag_results[j].event_id]['tags'] += " ";
+        }
+      }
+
+      num_tags_read++;
+      if (num_files_read == num_events && num_tags_read == num_events) {
+        callback(build_events_data(events));
+      }
+    });
+  }
+}
+
+function generate_list_of_events_for_tag(tag_id, req, callback)
+{
+  var sql = 'SELECT security_events.event_id, TIME(event_time_stamp) as timefield, ' +
+    'event_time_stamp+1 as time_stamp, camera FROM event_tag_mappings ' +
+    'LEFT JOIN security_events ON event_tag_mappings.event_id = security_events.event_id ' +
+    'WHERE event_tag_mappings.tag_id  = ? AND deleted = 0 ORDER BY event_time_stamp DESC';
+
+  client.query(sql, [tag_id], function(err, results) {
+    if (err) {
+      throw err;
+    }
+
+    process_event_sql_result(results, req, callback);
+  });
 }
 
 function generate_list_of_events(date_of_interest, req, callback)
@@ -172,97 +284,7 @@ function generate_list_of_events(date_of_interest, req, callback)
       throw err;
     }
 
-    var events = new Object;
-
-    var num_events = results.length;
-    var num_files_read = 0;
-    var num_tags_read = 0;
-
-    if (num_events == 0) {
-      callback(build_events_data(events));
-      return;
-    }
-
-    for (var i=0; i<num_events; ++i) {
-      var result = results[i];
-
-      if (!events[result.event_id]) {
-        events[result.event_id] = new Object;
-      }
-
-      events[result.event_id]['event_id'] = result.event_id;
-
-      var strtime = result.time_stamp.toString();
-      
-      var curr_hour = strtime.substr(8,2);
-      var a_p = "";
-      
-      if (curr_hour < 12) { a_p = "AM"; } else { a_p = "PM"; }
-      
-      if (curr_hour == 0) { curr_hour = 12; }
-      if (curr_hour > 12) { curr_hour -= 12; }
-      
-      var curr_min = strtime.substr(10,2);
-      if (curr_min.length == 1) { curr_min = "0" + curr_min; }
-
-      events[result.event_id]['camera'] = result.camera;
-      events[result.event_id]['pretty_time'] = curr_hour + ":" + curr_min + " " + a_p;
-      events[result.event_id]['event_date'] = strtime.slice(0,8);
-      if (req.user.access_level == 0) {
-        events[result.event_id]['can_delete'] = true;
-        events[result.event_id]['can_tag'] = true;
-      }
-      events[result.event_id]['tags'] = "";
-      
-      // find files for these events
-      var file_sql = 'SELECT event_id, filename, file_type FROM security_file WHERE event_id = ?';
-      client.query(file_sql, result.event_id, function(err, file_results) {
-	if (err) {
-	  throw err;
-	}
-
-	for (var j=0; j<file_results.length; ++j) {
-	  var file_result = file_results[j];
-
-	  if (file_result.file_type == 8) {
-            events[file_result.event_id]['movie'] = file_result.filename.replace(config.get_file_location(), '/media').slice(0, -4);
-	    
-            if (!events[file_result.event_id]['thumbnail']) {
-              events[file_result.event_id]['thumbnail'] = '/media/static';
-            }
-	  } else if (file_result.file_type == 1) {
-            events[file_result.event_id]['thumbnail'] = file_result.filename.replace(config.get_file_location(), '/media').slice(0, -4);
-	  }
-	}
-
-	num_files_read++;
-	if (num_files_read == num_events && num_tags_read == num_events) {
-	  callback(build_events_data(events));
-	}
-      });
-
-      // find tags for these events
-      var tag_sql = 'SELECT tag_val, event_id FROM event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
-	'WHERE event_id = ?';
-      client.query(tag_sql, result.event_id, function(err, tag_results) {
-	if (err) {
-	  throw err;
-	}
-
-	for (var j=0; j<tag_results.length; ++j) {
-	  events[tag_results[j].event_id]['tags'] += tag_results[j].tag_val;
-
-	  if (j + 1 != tag_results.length) {
-	    events[tag_results[j].event_id]['tags'] += " ";
-	  }
-	}
-
-	num_tags_read++;
-	if (num_files_read == num_events && num_tags_read == num_events) {
-	  callback(build_events_data(events));
-	}
-      });
-    }
+    process_event_sql_result(results, req, callback);
   });
 }
 
@@ -327,16 +349,65 @@ app.get('/list', function(req, res) {
     return;
   }
 
-  var date_of_interest = get_date_as_string(new Date());
+  if (req.param('tag')) {
+    // we want a list of tags, not everything from today
+    generate_list_of_events_for_tag(req.param('tag'), req, function(return_val) {
+      res.send(return_val);
+    });
+  } else {
+    var date_of_interest = get_date_as_string(new Date());
 
-  if (req.param('view_date')) {
-    date_of_interest = req.param('view_date');
+    if (req.param('view_date')) {
+      date_of_interest = req.param('view_date');
+    }
+
+    generate_list_of_events(date_of_interest, req, function(return_val) {
+      res.send(return_val);
+    });
+  }
+});
+
+app.get('/list-tags', function(req, res) {
+  if (!req.user) {
+    console.log("invalid user information");
+    res.statusCode = 401;
+    res.end();
+    return;
   }
 
-  generate_list_of_events(date_of_interest, req, function(return_val) {
-    console.log('returning ' + return_val);
+  var sql = 'SELECT tags.tag_id as id, tag_val AS val, COUNT( * ) AS count FROM event_tag_mappings ' +
+            'LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
+            'GROUP BY event_tag_mappings.tag_id ORDER BY count DESC';
+
+  client.query(sql, function(err, tag_results) {
+    if (err) {
+      throw err;
+    }
+
+    var return_val = '[';
+
+    for (var i=0; i<tag_results.length; ++i) {
+      var tag = tag_results[i];
+      if (return_val.length > 1) {
+        return_val += ',';
+      }
+      return_val += JSON.stringify(tag);
+    }
+    return_val += ']';
+
     res.send(return_val);
   });
+});
+
+app.get('/valid_user', function(req, res) {
+  if (!req.user) {
+    console.log("invalid user information");
+    res.statusCode = 401;
+    res.end();
+  } else {
+    res.statusCode = 200;
+    res.end();
+  }
 });
 
 app.get('/added', function(req, res) {
@@ -367,7 +438,7 @@ app.get('/added', function(req, res) {
   if (curr_hour == 0) { curr_hour = 12; }
   if (curr_hour > 12) { curr_hour -= 12; }
 
-  var curr_min = current_time.getMinutes();
+  var curr_min = current_time.getMinutes().toString();
   if (curr_min.length == 1) { curr_min = "0" + curr_min; }
 
   response.pretty_time = curr_hour + ":" + curr_min + " " + a_p;
@@ -375,7 +446,7 @@ app.get('/added', function(req, res) {
   response.event_date = get_date_as_string(current_time);
 
   if (req.param('thumbnail')) {
-    response.thumbnail = req.param('thumbnail').slice(0, -4) + ".thumb.jpg";
+    response.thumbnail = req.param('thumbnail').slice(0, -4);
   }
 
   if (req.param('movie')) {
@@ -447,11 +518,6 @@ app.get('/update_tag', function(req, res) {
     return;
   }
 
-  if (!req.param('val')) {
-    console.log("no incoming value for tag request!");
-    return;
-  }
-
   var existing_tag_query = 'SELECT tag_val, tags.tag_id from event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id WHERE ?';
   client.query(existing_tag_query, {event_id: req.param('id')}, function(err, results) {
     if (err) {
@@ -462,85 +528,92 @@ app.get('/update_tag', function(req, res) {
     } else {
       var existing_tags = {};
       for (var idx in results) {
-	existing_tags[results[idx].tag_val] = results[idx].tag_id;
+        existing_tags[results[idx].tag_val] = results[idx].tag_id;
       }
 
-      var words = req.param('val').split(" ");
+      if (req.param('val')) {
+        var words = req.param('val').split(" ");
 
-      for (var idx in words) {
-	var tag_word = words[idx];
-	
-	// first see if there is a tag_id for this, if not create one
-	if (existing_tags[tag_word]) {
-	  // existing, remove it from the list and ignore
-	  delete existing_tags[tag_word];
-	} else {
-	  // not in the list, see if the have a tag for it
-	  client.query('SELECT tag_id from tags WHERE ?', {tag_val: tag_word}, function(err, results) {
-	    if (err) {
-              throw err;
-              res.statusCode = 401;
-              res.end();
-              return;
-	    } else {
-              if (results.length >= 1) {
-		// found the tag_id, so just add it to our list
-		add_tag(req.param('id'), results[0].tag_id);
-              } else {
-		// no tag currently, so we make one
-		var post = { tag_val: tag_word };
-		
-		client.query('INSERT into tags set ?', post, function(err2, result) {
-		  if (err2) {
-		    throw err2;
-		    res.statusCode = 401;
-		    res.end();
-		    return;
-		  } else {
-		    add_tag(req.param('id'), result.insertId);
-		  }
-		});
-              }
-	    }
-	  });
-	}
+        for (var idx in words) {
+          var tag_word = words[idx];
+          console.log(' - ' + tag_word);
+
+          // first see if there is a tag_id for this, if not create one
+          if (existing_tags[tag_word]) {
+            // existing, remove it from the list and ignore
+            delete existing_tags[tag_word];
+            console.log('   - existing');
+          } else {
+            console.log('   - creating');
+            (function (_tag_word) {
+              // not in the list, see if the have a tag for it
+              client.query('SELECT tag_id from tags WHERE ?', {tag_val: _tag_word}, function(err, results) {
+                if (err) {
+                  throw err;
+                  res.statusCode = 401;
+                  res.end();
+                  return;
+                } else {
+                  if (results.length >= 1) {
+                    // found the tag_id, so just add it to our list
+                    add_tag(req.param('id'), results[0].tag_id);
+                  } else {
+                    // no tag currently, so we make one
+                    var post = { tag_val: _tag_word };
+
+                    client.query('INSERT into tags set ?', post, function(err2, result) {
+                      if (err2) {
+                        throw err2;
+                        res.statusCode = 401;
+                        res.end();
+                        return;
+                      } else {
+                        add_tag(req.param('id'), result.insertId);
+                      }
+                    });
+                  }
+                }
+              });
+            })(tag_word);
+          }
+        }
       }
 
       // now see if we have anything removed
       for (var idx in existing_tags) {
-	var params = [existing_tags[idx], req.param('id')];
-	client.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
-	  if (err2) {
-	    throw err2;
-	    res.statusCode = 401;
-	    res.end();
-	    return;
-	  }
+        var params = [existing_tags[idx], req.param('id')];
+        client.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
+          if (err2) {
+            throw err2;
+            res.statusCode = 401;
+            res.end();
+            return;
+          }
 
-	  // see if we need to nuke this now unused tag
-	  var params = [existing_tags[idx]];
-	  client.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
-	    if (err3) {
-	      throw err3;
-	      res.statusCode = 401;
-	      res.end();
-	      return;
-	    }
+          // see if we need to nuke this now unused tag
+          var params = [existing_tags[idx]];
+          client.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
+            if (err3) {
+              throw err3;
+              res.statusCode = 401;
+              res.end();
+              return;
+            }
 
-	    if (count_result.length > 0 && count_result[0].num_used == 0) {
-	      // ok, so nuke him
-	      var params = [existing_tags[idx]];
-	      client.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
-		if (err4) {
-		  throw err4;
-		  res.statusCode = 401;
-		  res.end();
-		  return;
-		}
-	      });
-	    }
-	  });
-	});
+            if (count_result.length > 0 && count_result[0].num_used == 0) {
+              // ok, so nuke him
+              var params = [existing_tags[idx]];
+              client.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
+                if (err4) {
+                  throw err4;
+                  res.statusCode = 401;
+                  res.end();
+                  return;
+                }
+              });
+            }
+          });
+        });
       }
     }
   });

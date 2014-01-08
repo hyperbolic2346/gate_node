@@ -13,16 +13,19 @@
   <![endif]-->
   <link rel="stylesheet" type="text/css" href="css/normalize.css" />
   <link rel="stylesheet" type="text/css" href="css/datepicker.css" />
-<!--  <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/css/base/minified/jquery.ui.datepicker.min.css" /> -->
-<!--  <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/css/base/minified/jquery.ui.theme.min.css" /> -->
 
   <div id="messages"></div>
   <div id="login"></div>
   <div id="day"></div>
-  <div id="live_video_toggle_div"></div>
-  <div id="live_video_div"></div>
-  <div id="gate_control_div"></div>
-  <div id="calendar"></div>
+  <div id="main_flex">
+    <div id="live_video_toggle_div"></div>
+    <div id="live_video_div"></div>
+    <div id="tiny_flex">
+      <div id="gate_control_div"></div>
+      <div id="tag_cloud"></div>
+      <div id="calendar"></div>
+    </div>
+  </div>
   <div id="camera_events_toggle_div"></div>
   <div id="camera_events"></div>
   <div id="live_background" style="display:none;position:absolute;top:0px;left:0px;width:100%;height:100%;z-index:998;opacity:0.6;filter:alpha(opacity=60);background-color:#000000;"></div>
@@ -32,9 +35,9 @@
   <script src="//cdnjs.cloudflare.com/ajax/libs/backbone.js/0.9.2/backbone-min.js"></script>
   <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/1.1.2/handlebars.min.js"></script>
   <script src="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
-  <script type="text/javascript" src="/lib/html5lightbox/html5lightbox.js"></script>
   <script src="//crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/md5.js"></script>
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/lib/html5lightbox/html5lightbox.js"></script>
 
 
 <script id="login-template" type="text/x-handlebars-template">
@@ -84,6 +87,10 @@
   </div>
 </script>
 
+<script id="tag-template" type="text/x-handlebars-template">
+    <a href='/view_tags/{{id}}'><div class="tag_word" id="{{id}}">{{val}}</div></a>
+</script>
+
 <script id="gate-template" type="text/x-handlebars-template">
     <div class="gate_status"><div class="gate_name">{{name}}</div>
 
@@ -122,6 +129,7 @@
 
   <script>
     var Mobile_device = $("#live_video_toggle_div").css('display') != 'none';
+    var Aspect_ratio = 4/3;
 
     function get_date_as_string(today) {
       var date_of_interest = today.getFullYear().toString();
@@ -179,14 +187,18 @@
       }
     });
 
+    var Tag = Backbone.Model.extend();
+
+    var Tags = Backbone.Collection.extend({
+      url: '/list-tags',
+      model: Tag,
+    });
+
     var Gate = Backbone.Model.extend();
 
     var Gates = Backbone.Collection.extend({
       url: '/gate_status',
       model: Gate,
-//      parse: function(response) {
-//        return response[0];
-//      }
     });
 
     var GateView = Backbone.View.extend({
@@ -203,7 +215,7 @@
       },
       render: function() {
         var that = this;
-	that.$el.empty();
+        that.$el.empty();
         _.each(this.collection.models, function (item) {
             that.$el.append(that.template(item.attributes));
         }, this);
@@ -215,7 +227,7 @@
     var CalendarView = Backbone.View.extend({
       el: '#calendar',
       render: function(my_view_date) {
-        $('#calendar').datepicker({
+        this.$el.datepicker({
           inline: true,
           showOtherMonths: true,
           dayNamesMin: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
@@ -223,9 +235,12 @@
         });
         if (my_view_date != '') {
           var date_string = my_view_date.slice(4, 6) + '/' + my_view_date.slice(6, 8) + '/' + my_view_date.slice(0, 4);
-          $('#calendar').datepicker('setDate', date_string);
+          this.$el.datepicker('setDate', date_string);
         }
       },
+      hide: function() {
+        this.$el.empty();
+      }
     });
 
     var calendarView = new CalendarView();
@@ -243,22 +258,26 @@
       template: Handlebars.compile($('#video-template').html()),
       update_template: Handlebars.compile($('#video-update-template').html()),
       render_single_video: function (model) {
+        console.log('updating model ' + model.attributes.movie);
         $('#camera_event' + model.id).html(this.update_template(model.attributes));
         if (typeof html5Lightbox != 'undefined') {
           html5Lightbox.reReadData();
         }
       },
+      hide: function() {
+        $('#camera_events').empty();
+      },
       render: function() {
         var that = this;
-	that.$el.empty();
+        that.$el.empty();
         _.each(this.collection.models, function (item) {
-            that.$el.append(that.template(item.attributes));
+          that.$el.append(that.template(item.attributes));
         }, this);
         if (typeof html5Lightbox != 'undefined') {
           html5Lightbox.reReadData();
         }
       },
-      update_data: function (my_view_date) {
+      update_data: function (options) {
         var that = this;
 
         if (Mobile_device) {
@@ -266,37 +285,61 @@
           // so instead of doing all this, we will just render that and only try to update
           // this when we get the chance
 
+          liveVideoView.render(options.view_date);
+          $("#camera_events_toggle_div").empty();
           $("#camera_events_toggle_div").append($('<input type="button" value="Show Videos" id="camera_events_toggle_button" />'));
           $("#camera_events_toggle_button").click(function(e) {
             $("#camera_events").toggle();
-            if ($("#camera_events").css('display') == 'none') { 
+            if ($("#camera_events").css('display') == 'none') {
               $("#camera_events_toggle_button").attr('value', 'Show Videos');
               videoListView.hide();
+              tagView.hide();
+              calendarView.hide();
             } else { 
               $("#camera_events_toggle_button").attr('value', 'Hide Videos');
               if ($('#camera_events').is(':empty')) {
-                var my_view_date = getURLParameter("view_date");
-                if (my_view_date.length <= 0 || my_view_date == "null") {
-                  my_view_date = '';
-                }
+                that.collection.fetch({
+                  data: $.param(options),
+                  success: function (col, response) {
+                    if (options.view_date !== undefined) {
+                      calendarView.render(options.view_date);
 
-                // render video list
-                videoListView.render(my_view_date);
+                      tagView.update();
+                    } else {
+                      // rendering just a single tag worth of videos
+                      calendarView.render('');
+
+                      liveVideoView.hide();
+                    }
+                  },
+                  error: function (response) {
+                    Backbone.history.navigate("login", true);
+                  },
+                })
               }
             }
           });
 
         } else {
           this.collection.fetch({
-            data: $.param({ view_date: my_view_date}),
+            data: $.param(options),
             success: function (col, response) {
-              calendarView.render(my_view_date);
+              if (options.view_date !== undefined) {
+                calendarView.render(options.view_date);
 
-              // render live video
-              liveVideoView.render(my_view_date);
+                // render live video
+                liveVideoView.render(options.view_date);
+
+                tagView.update();
+              } else {
+                // rendering just a single tag worth of videos
+                calendarView.render('');
+
+                liveVideoView.hide();
+              }
             },
             error: function (response) {
-              window.location.hash = "login";
+              Backbone.history.navigate("login", true);
             },
           })
         }
@@ -308,11 +351,15 @@
     var LiveVideoView = Backbone.View.extend({
       el: '#live_video_div',
       template: Handlebars.compile($("#live-video-template").html()),
-      hide: function() { this.$el.empty(); },
+      hide: function() { 
+        this.$el.empty();
+        this.$el.css({'width': 'auto', 'height': 'auto'});
+      },
       render: function (my_view_date) {
         if (Mobile_device) {
           that = this;
 
+          $("#live_video_toggle_div").empty();
           $("#live_video_toggle_div").append($('<input type="button" value="Show Live Feed" id="live_video_toggle_button" />'));
           $("#live_video_toggle_button").click(function(e) {
             $("#live_video_div").toggle();
@@ -322,17 +369,7 @@
             } else {
               $("#live_video_toggle_button").attr('value', 'Hide Live Feed');
 
-              // show live video
-              if (my_view_date != '') {
-                // not sure if we should show or not yet
-                var date_of_interest = get_today_as_date_string();
-
-                if (date_of_interest != my_view_date) {
-                  that.$el.empty();
-                  return;
-                }
-              }
-
+              // show live video anytime for the mobile
               that.$el.html(that.template());
 
               size_live_feed();
@@ -344,8 +381,7 @@
             var date_of_interest = get_today_as_date_string();
 
             if (date_of_interest != my_view_date) {
-              this.$el.empty();
-              this.$el.css({'width': 'auto', 'height': 'auto'});
+              this.hide();
               return;
             }
           }
@@ -359,6 +395,39 @@
     });
 
     var liveVideoView = new LiveVideoView();
+
+    var TagView = Backbone.View.extend({
+      el: '#tag_cloud',
+
+      template: Handlebars.compile($("#tag-template").html()),
+      initialize: function() {
+        this.collection = new Tags();
+
+        //listen to the reset event on the collection. When the reset event trigger, call the render function.
+        this.collection.on('reset', this.render, this);
+
+//        this.collection.on('change', this.render_single_video, this);
+      },
+      render: function () {
+        var that = this;
+        that.$el.empty();
+        _.each(this.collection.models, function (item) {
+          that.$el.append(that.template(item.attributes));
+        }, this);
+      },
+      hide: function() {
+        this.$el.empty();
+      },
+      update: function() {
+        this.collection.fetch({
+          error: function (response) {
+            Backbone.history.navigate("login", true);
+          },
+        });
+      }
+    });
+
+    var tagView = new TagView();
 
     var LoginView = Backbone.View.extend({
       el: '#login',
@@ -400,9 +469,11 @@
 
         // nuke videos if they exist
         $('#camera_events').empty();
+        $('#camera_events_toggle_div').empty();
 
         // nuke live video feed if it exists
         $('#live_video_div').empty();
+        $('#live_video_toggle_div').empty();
 
         this.$el.html(this.template());
       }
@@ -416,6 +487,7 @@
           "": "home", 
           "login": "login",
           "view_date/:date_of_interest": "view_date",
+          "view_tags/:tag_id": "view_tags",
         }
     });
 
@@ -429,13 +501,52 @@
         Currently_selected_date = my_view_date;
       }
 
-      videoListView.update_data(my_view_date);
+      if (Mobile_device) {
+        // first we need to verify the user is authenticated
+        // since we display buttons and things before actual
+        // data is downloaded to speed things up
+        $.get('/valid_user', function() { 
+          videoListView.update_data({view_date: my_view_date});
+        }).fail(function() {
+          Backbone.history.navigate("login", true);
+        });
+      } else {
+        videoListView.update_data({view_date: my_view_date});
+      }
+    });
+
+    router.on('route:view_tags', function(tag_id) {
+      Currently_selected_date = '';
+
+      if (Mobile_device) {
+        // first we need to verify the user is authenticated
+        // since we display buttons and things before actual
+        // data is downloaded to speed things up
+        $.get('/valid_user', function() { 
+          videoListView.update_data({tag: tag_id});
+        }).fail(function() {
+          Backbone.history.navigate("login", true);
+        });
+      } else {
+        videoListView.update_data({tag: tag_id});
+      }
     });
 
     router.on('route:home', function() {
       // render video list
       Currently_selected_date = get_today_as_date_string();
-      videoListView.update_data('');
+      if (Mobile_device) {
+        // first we need to verify the user is authenticated
+        // since we display buttons and things before actual
+        // data is downloaded to speed things up
+        $.get('/valid_user', function() { 
+          videoListView.update_data({view_date: ''});
+        }).fail(function() {
+          Backbone.history.navigate("login", true);
+        });
+      } else {
+        videoListView.update_data({view_date: ''});
+      }
     });
 
     router.on('route:login', function() {
@@ -451,19 +562,20 @@
 
     router.navigate('/view_date/' + date_string);    
     Currently_selected_date = date_string;
-    videoListView.update_data(date_string);
+    videoListView.update_data({view_date: date_string});
   }
 
   function update_tags(event_id, inp) {
     var txt = inp.value;
 
     console.log("setting tags to " + txt);
-				 
+
     $.get('update_tag', {id: event_id, val: txt});
 
     var vid = videoListView.collection.get(event_id);
     if (vid) {
       vid.set({tags: txt});
+      tagView.update();
     }
 //    $('#html5-close').trigger('click');
   }
@@ -476,10 +588,10 @@
     width = $(window).width() - 30;
     height = $(window).height() - 30;
 
-    width_ratio = 4 / 3 * height;
+    width_ratio = Aspect_ratio * height;
     if (width_ratio > width) {
       // need to use width as limiting factor
-      height = 3 / 4 * width;
+      height = (1 / Aspect_ratio) * width;
     } else {
       width = width_ratio;
     }
@@ -508,10 +620,10 @@
   function size_live_feed() {
     if ($(window).width() > 480 && $(window).height() > 400) {
       div_height = $(window).height() - 150;  // 240 for one row of thumbnails
-      div_width = 16 / 8 * div_height;
+      div_width = Aspect_ratio * div_height;
       if (div_width > $(window).width() - 500) {
         div_width = $(window).width() - 500;
-        div_height = 8 / 16 * div_width;
+        div_height = (1 / Aspect_ratio) * div_width;
       }
       $("#live_video_div").css("width", div_width).css("height", div_height);
       $("#live_video").css("width", div_width - 5).css("height", div_height - 5 - $("#live_label").outerHeight(true));
@@ -564,26 +676,54 @@
         return;
       }
 
-      console.log("adding video " + data);
+      if (Mobile_device && $("#camera_events").css('display') == 'none') {
+        return;
+      }
+
+      console.log("adding video " + data.movie);
       if (!data.thumbnail) {
         // no thumbnail, insert static
         console.log("no thumbnail, inserting static");
         data.thumbnail = "/media/static";
+      } else {
+        console.log("using thumbnail " + data.thumbnail);
       }
+
       if (data.movie && data.movie.length > 0) {
         data.movie = data.movie.slice(0, -4);
       }
 
       var vid = videoListView.collection.get(data.id);
       if (vid) {
+        console.log("found existing item, updating");
         vid.set(data);
       } else {
+        console.log("can't found existing item, adding new");
         videoListView.collection.add(data);
       }
       videoListView.render();
     });
 
   }
+
+  var html5lightbox_options = {
+    resizespeed: 0,
+    fadespeed: 0,
+  };
+
+  var dt = $('#calendar').datepicker("getDate");
+  $('#day').html('<h3>' + $.datepicker.formatDate('DD, MM d yy', dt) + '</h3>');
+
+  // add a default handler for links that are not data bypassed
+  $(document).on("click", "a:not([data-bypass])", function(evt) {
+    var href = { prop: $(this).prop("href"), attr: $(this).attr("href") };
+    var root = location.protocol + "//" + location.host + Backbone.history.options.root;
+
+    if (href.prop && href.prop.slice(0, root.length) === root) {
+      evt.preventDefault();
+      Backbone.history.navigate(href.attr, true);
+    }
+  });
   </script>
 </body>
 </html>
