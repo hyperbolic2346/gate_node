@@ -1,22 +1,20 @@
 var express = require('express'),
 passport = require('passport'),
 LocalStrategy = require('passport-local').Strategy,
-mysql = require('mysql'),
 port = 8888,
 app = express(),
 dgram = require('dgram'),
-config = require('./config.js');
+config = require(__dirname + '/config.js');
+
+var database = require(__dirname + "/database");
+
+app.use(express.logger());
 
 app.use(express.static(__dirname + '/docs'));
-
-global.client = mysql.createConnection(config.get_sql_info());
  
-client.connect();
-
 app.use(express.cookieParser(config.get_cookie_secret()));
 app.use(express.session({secret: config.get_session_secret()}));
 
-app.use(express.logger());
 app.use(express.bodyParser());
 app.use(express.methodOverride());
 
@@ -75,13 +73,15 @@ function update_gate_info() {
 function add_tag(e_id, t_id) {
   var post = { event_id: e_id, tag_id: t_id };
 
-  client.query('SELECT * FROM event_tag_mappings WHERE event_id = ? AND tag_id = ?', [e_id, t_id], function(err, results) {
+  var connection = database.getConnection();
+  connection.query('SELECT * FROM event_tag_mappings WHERE event_id = ? AND tag_id = ?', [e_id, t_id], function(err, results) {
     if (err) {
       throw err;
       return;
     } else {
       if (results.length == 0) {
-        client.query('INSERT into event_tag_mappings set ?', post, function(err2, result) {
+        var connection = database.getConnection();
+        connection.query('INSERT into event_tag_mappings set ?', post, function(err2, result) {
           if (err2) {
             throw err2;
           }
@@ -207,7 +207,8 @@ function process_event_sql_result(sql_result, req, callback)
     
     // find files for these events
     var file_sql = 'SELECT event_id, filename, file_type FROM security_file WHERE event_id = ?';
-    client.query(file_sql, result.event_id, function(err, file_results) {
+    var connection = database.getConnection();
+    connection.query(file_sql, result.event_id, function(err, file_results) {
       if (err) {
         throw err;
       }
@@ -235,7 +236,8 @@ function process_event_sql_result(sql_result, req, callback)
     // find tags for these events
     var tag_sql = 'SELECT tag_val, event_id FROM event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
                   'WHERE event_id = ?';
-    client.query(tag_sql, result.event_id, function(err, tag_results) {
+    var connection = database.getConnection();
+    connection.query(tag_sql, result.event_id, function(err, tag_results) {
       if (err) {
         throw err;
       }
@@ -262,8 +264,8 @@ function generate_list_of_events_for_tag(tag_id, req, callback)
     'event_time_stamp+1 as time_stamp, camera FROM event_tag_mappings ' +
     'LEFT JOIN security_events ON event_tag_mappings.event_id = security_events.event_id ' +
     'WHERE event_tag_mappings.tag_id  = ? AND deleted = 0 ORDER BY event_time_stamp DESC';
-
-  client.query(sql, [tag_id], function(err, results) {
+  var connection = database.getConnection();
+  connection.query(sql, [tag_id], function(err, results) {
     if (err) {
       throw err;
     }
@@ -278,8 +280,8 @@ function generate_list_of_events(date_of_interest, req, callback)
     'event_time_stamp+1 as time_stamp, camera FROM security_events ' +
     'WHERE event_time_stamp >= ? AND event_time_stamp <= ? ' +
     'AND deleted = 0 ORDER BY event_time_stamp DESC';
-
-  client.query(sql, [date_of_interest + '000000', date_of_interest + '235959'], function(err, results) {
+  var connection = database.getConnection();
+  connection.query(sql, [date_of_interest + '000000', date_of_interest + '235959'], function(err, results) {
     if (err) {
       throw err;
     }
@@ -379,7 +381,8 @@ app.get('/list-tags', function(req, res) {
             'LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
             'GROUP BY event_tag_mappings.tag_id ORDER BY count DESC';
 
-  client.query(sql, function(err, tag_results) {
+  var connection = database.getConnection();
+  connection.query(sql, function(err, tag_results) {
     if (err) {
       throw err;
     }
@@ -474,7 +477,8 @@ app.get('/delete', function(req, res) {
     return;
   }
 
-  client.query('UPDATE security_events set deleted=1 WHERE ?', {event_id: req.param('id')}, function(err, results) {
+  var connection = database.getConnection();
+  connection.query('UPDATE security_events set deleted=1 WHERE ?', {event_id: req.param('id')}, function(err, results) {
     if (err) {
       throw err;
       res.statusCode = 401;
@@ -482,7 +486,8 @@ app.get('/delete', function(req, res) {
     } else {
       var find_sql = 'SELECT event_time_stamp+1 AS time_stamp FROM security_events WHERE ?';
 
-      client.query(find_sql, {event_id: req.param('id')}, function(err, results) {
+      var connection = database.getConnection();
+      connection.query(find_sql, {event_id: req.param('id')}, function(err, results) {
         if (err) {
           throw err;
           res.statusCode = 401;
@@ -519,7 +524,8 @@ app.get('/update_tag', function(req, res) {
   }
 
   var existing_tag_query = 'SELECT tag_val, tags.tag_id from event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id WHERE ?';
-  client.query(existing_tag_query, {event_id: req.param('id')}, function(err, results) {
+  var connection = database.getConnection();
+  connection.query(existing_tag_query, {event_id: req.param('id')}, function(err, results) {
     if (err) {
       throw err;
       res.statusCode = 401;
@@ -547,7 +553,8 @@ app.get('/update_tag', function(req, res) {
             console.log('   - creating');
             (function (_tag_word) {
               // not in the list, see if the have a tag for it
-              client.query('SELECT tag_id from tags WHERE ?', {tag_val: _tag_word}, function(err, results) {
+              var connection = database.getConnection();
+              connection.query('SELECT tag_id from tags WHERE ?', {tag_val: _tag_word}, function(err, results) {
                 if (err) {
                   throw err;
                   res.statusCode = 401;
@@ -561,7 +568,8 @@ app.get('/update_tag', function(req, res) {
                     // no tag currently, so we make one
                     var post = { tag_val: _tag_word };
 
-                    client.query('INSERT into tags set ?', post, function(err2, result) {
+                    var connection = database.getConnection();
+                    connection.query('INSERT into tags set ?', post, function(err2, result) {
                       if (err2) {
                         throw err2;
                         res.statusCode = 401;
@@ -582,7 +590,8 @@ app.get('/update_tag', function(req, res) {
       // now see if we have anything removed
       for (var idx in existing_tags) {
         var params = [existing_tags[idx], req.param('id')];
-        client.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
+        var connection = database.getConnection();
+        connection.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
           if (err2) {
             throw err2;
             res.statusCode = 401;
@@ -592,7 +601,8 @@ app.get('/update_tag', function(req, res) {
 
           // see if we need to nuke this now unused tag
           var params = [existing_tags[idx]];
-          client.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
+          var connection = database.getConnection();
+          connection.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
             if (err3) {
               throw err3;
               res.statusCode = 401;
@@ -603,7 +613,8 @@ app.get('/update_tag', function(req, res) {
             if (count_result.length > 0 && count_result[0].num_used == 0) {
               // ok, so nuke him
               var params = [existing_tags[idx]];
-              client.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
+              var connection = database.getConnection();
+              connection.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
                 if (err4) {
                   throw err4;
                   res.statusCode = 401;
@@ -635,7 +646,8 @@ app.get('/gate_status', function(req, res) {
 
 function check_auth_user(username, password, done) {
   var sql="SELECT * FROM users WHERE username = ? AND password = ?";
-  client.query(sql, [username, password], function(err, results) {
+  var connection = database.getConnection();
+  connection.query(sql, [username, password], function(err, results) {
     if (err) {
       throw err;
     }

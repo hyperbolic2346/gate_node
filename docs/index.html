@@ -280,7 +280,8 @@
       update_data: function (options) {
         var that = this;
 
-        if (Mobile_device) {
+        // if we have a mobile device and are currently showing videos, just update them
+        if (Mobile_device && $("#camera_events").css('display') == 'none') {
           // on a mobile device, we want to get them to the information they probably want first,
           // so instead of doing all this, we will just render that and only try to update
           // this when we get the chance
