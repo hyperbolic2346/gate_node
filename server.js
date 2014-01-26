@@ -8,10 +8,9 @@ config = require(__dirname + '/config.js');
 
 var database = require(__dirname + "/database");
 
-app.use(express.logger());
-
 app.use(express.static(__dirname + '/docs'));
  
+app.use(express.logger());
 app.use(express.cookieParser(config.get_cookie_secret()));
 app.use(express.session({secret: config.get_session_secret()}));
 
@@ -26,6 +25,13 @@ var Arduino_socket = dgram.createSocket("udp4");
 var Arduino_response = [];
 
 var Arduino_timeout = 0;
+
+Date.prototype.yyyymmdd = function() {
+   var yyyy = this.getFullYear().toString();
+   var mm = (this.getMonth()+1).toString(); // getMonth() is zero-based
+   var dd  = this.getDate().toString();
+   return yyyy + (mm[1]?mm:"0"+mm[0]) + (dd[1]?dd:"0"+dd[0]); // padding
+  };
 
 Arduino_socket.on('message', function(msg, rinfo) {
   var new_arduino_response = [];
@@ -99,25 +105,6 @@ function timeout_tick() {
       setTimeout(timeout_tick, 5000);
     }
   }
-}
-
-function get_date_as_string(dt)
-{
-  var date_of_interest = dt.getFullYear().toString();
-
-  if ((dt.getMonth() + 1).toString().toString().length == 1) {
-    date_of_interest += "0" + (dt.getMonth() + 1).toString().toString();
-  } else {
-    date_of_interest += (dt.getMonth() + 1).toString();
-  }
-
-  if (dt.getDate().toString().length == 1) {
-    date_of_interest += "0" + dt.getDate().toString();
-  } else {
-    date_of_interest += dt.getDate().toString();
-  }
-
-  return date_of_interest;
 }
 
 function build_events_data(events)
@@ -208,7 +195,7 @@ function process_event_sql_result(sql_result, req, callback)
     // find files for these events
     var file_sql = 'SELECT event_id, filename, file_type FROM security_file WHERE event_id = ?';
     var connection = database.getConnection();
-    connection.query(file_sql, result.event_id, function(err, file_results) {
+    connection.query(file_sql, [result.event_id], function(err, file_results) {
       if (err) {
         throw err;
       }
@@ -237,7 +224,7 @@ function process_event_sql_result(sql_result, req, callback)
     var tag_sql = 'SELECT tag_val, event_id FROM event_tag_mappings LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
                   'WHERE event_id = ?';
     var connection = database.getConnection();
-    connection.query(tag_sql, result.event_id, function(err, tag_results) {
+    connection.query(tag_sql, [result.event_id], function(err, tag_results) {
       if (err) {
         throw err;
       }
@@ -343,6 +330,119 @@ app.post('/login', passport.authenticate('local'),
   function(req, res) { res.redirect('/'); }
 );
 
+function delete_tag_entry(tag_id, event_id, done_func) {
+  var params = [tag_id, event_id];
+  var connection = database.getConnection();
+  connection.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
+    if (err2) {
+      throw err2;
+      done_func(true);
+      return;
+    }
+
+    // see if we need to nuke this now unused tag
+    var params = [existing_tags[idx]];
+    var connection = database.getConnection();
+    connection.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
+      if (err3) {
+        throw err3;
+        done_func(true);
+        return;
+      }
+
+      if (count_result.length > 0 && count_result[0].num_used == 0) {
+        // ok, so nuke him
+        var params = [existing_tags[idx]];
+        var connection = database.getConnection();
+        connection.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
+          if (err4) {
+            throw err4;
+            done_func(true);
+          } else {
+            done_func(false);
+          }
+        });
+      }
+    });
+  });
+}
+
+function purge_old_deleted_videos() {
+  var today = new Date();
+  if (today.getMonth() == 1) {
+    var last_month = new Date(today.getFullYear() - 1, 12, today.getDate());
+  } else {
+    var last_month = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+  }
+
+  var sql = 'SELECT event_id FROM security_events WHERE event_time_stamp <= ? AND deleted = 1';
+  console.log(sql + last_month.yyyymmdd());
+  var connection = database.getConnection();
+  connection.query(sql, [last_month.yyyymmdd() + '000000'], function(err, results) {
+    if (err) {
+      throw err;
+    }
+
+    // ok, we need to nuke these, but first we should find and remove any tags associated with this
+    for (var i=0; i<results.length; ++i) {
+      var ev = results[i].event_id;
+
+      var events_completed = 0;
+
+      var sql = 'SELECT tag_id FROM event_tag_mappings WHERE event_id = ?';
+      console.log(sql + ' - ' + ev);
+      var connection = database.getConnection();
+      connection.query(sql, [ev], function(err, tag_results) {
+        if (err) {
+          throw err;
+        }
+
+        // special case, no tags!
+        if (tag_results.length == 0) {
+          console.log('no tag results, nuking event ' + ev);
+          // nuke the event itself
+          var nuke_sql = 'DELETE FROM security_events WHERE event_id = ?';
+          var nuke_connection = database.getConnection();
+          nuke_connection.query(nuke_sql, [ev], function (err, nuke_res) {
+            if (err) {
+              throw err;
+            }
+            console.log('nuked event ' + ev);
+            events_completed++;
+            if (events_completed == results.length) {
+              // finished events, can't think of anything important to do right now...
+            }
+          });
+        } else {
+          var tags_nuked = 0;
+
+          console.log('found ' + tag_results.length + ' tags');
+          for (var j=0; j<tag_results.length; ++j) {
+            console.log('nuking event: ' + event_id + ' tag id ' + tag_results[j].tag_id);
+
+            delete_tag_entry(event_id, tag_results[j].tag_id, function () {
+              tags_nuked++;
+
+              if (tags_nuked == tag_results.length) {
+                // finished with this event
+                // nuke the event itself
+                var nuke_sql = 'DELETE FROM security_events WHERE event_id = ?';
+                var nuke_connection = database.getConnection();
+                nuke_connection.query(sql, [ev], function (err, nuke_res) {
+                  events_completed++;
+                  if (events_completed == results.length) {
+                    // finished events, can't think of anything important to do right now...
+                  }
+                });
+              }
+            });
+          }
+        }
+      });
+    }
+  });  
+}
+
 app.get('/list', function(req, res) {
   if (!req.user) {
     console.log("invalid user information");
@@ -351,13 +451,15 @@ app.get('/list', function(req, res) {
     return;
   }
 
+  purge_old_deleted_videos();
+
   if (req.param('tag')) {
     // we want a list of tags, not everything from today
     generate_list_of_events_for_tag(req.param('tag'), req, function(return_val) {
       res.send(return_val);
     });
   } else {
-    var date_of_interest = get_date_as_string(new Date());
+    var date_of_interest = new Date().yyyymmdd();
 
     if (req.param('view_date')) {
       date_of_interest = req.param('view_date');
@@ -379,6 +481,8 @@ app.get('/list-tags', function(req, res) {
 
   var sql = 'SELECT tags.tag_id as id, tag_val AS val, COUNT( * ) AS count FROM event_tag_mappings ' +
             'LEFT JOIN tags ON tags.tag_id = event_tag_mappings.tag_id ' +
+            'LEFT JOIN security_events ON security_events.event_id = event_tag_mappings.event_id ' +
+            'WHERE security_events.deleted = 0 ' +
             'GROUP BY event_tag_mappings.tag_id ORDER BY count DESC';
 
   var connection = database.getConnection();
@@ -446,7 +550,7 @@ app.get('/added', function(req, res) {
 
   response.pretty_time = curr_hour + ":" + curr_min + " " + a_p;
 
-  response.event_date = get_date_as_string(current_time);
+  response.event_date = current_time.yyyymmdd();
 
   if (req.param('thumbnail')) {
     response.thumbnail = req.param('thumbnail').slice(0, -4);
@@ -587,50 +691,20 @@ app.get('/update_tag', function(req, res) {
         }
       }
 
+      var num_returns = 0;
       // now see if we have anything removed
       for (var idx in existing_tags) {
-        var params = [existing_tags[idx], req.param('id')];
-        var connection = database.getConnection();
-        connection.query('DELETE FROM event_tag_mappings WHERE tag_id = ? AND event_id = ?', params, function(err2, result) {
-          if (err2) {
-            throw err2;
-            res.statusCode = 401;
+        delete_tag_entry(existing_tags[idx], req.param('id'), function(had_err) {
+          num_returns++;
+          if (num_returns == existing_tags.length()) {
+            // done, return
+            res.statusCode = 200;
             res.end();
-            return;
           }
-
-          // see if we need to nuke this now unused tag
-          var params = [existing_tags[idx]];
-          var connection = database.getConnection();
-          connection.query('SELECT COUNT(*) as num_used FROM event_tag_mappings WHERE tag_id = ?', params, function(err3, count_result) {
-            if (err3) {
-              throw err3;
-              res.statusCode = 401;
-              res.end();
-              return;
-            }
-
-            if (count_result.length > 0 && count_result[0].num_used == 0) {
-              // ok, so nuke him
-              var params = [existing_tags[idx]];
-              var connection = database.getConnection();
-              connection.query('DELETE FROM tags WHERE tag_id = ?', params, function(err4, nuke_result) {
-                if (err4) {
-                  throw err4;
-                  res.statusCode = 401;
-                  res.end();
-                  return;
-                }
-              });
-            }
-          });
-        });
+        })
       }
     }
   });
-
-  res.statusCode = 200;
-  res.end();
 });
 
 app.get('/gate_status', function(req, res) {
